@@ -26,7 +26,9 @@ const SITUATIONS: { id: Situation; label: string }[] = [
 ];
 
 export default function App() {
-  const [tab, setTab] = useState<'main' | 'settings'>('main');
+  const [tab, setTab] = useState<'main' | 'settings'>(() =>
+    typeof location !== 'undefined' && location.hash === '#settings' ? 'settings' : 'main',
+  );
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [players, setPlayers] = useState(loadPlayers);
   const [btnSeat, setBtnSeat] = useState(0);

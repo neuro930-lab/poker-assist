@@ -3,6 +3,15 @@ import { ALL_POSITIONS } from '../logic/positions';
 import { defaultSettings, exportSettings, parseSettings, type Settings } from '../logic/settings';
 import { HandGrid, textColorFor } from './HandGrid';
 
+/** 埋め込み表示（iframe内）ではファイルの保存が許可されないことがあるため、コピーで書き出す */
+const EMBEDDED = (() => {
+  try {
+    return window.self !== window.top;
+  } catch {
+    return true;
+  }
+})();
+
 interface Props {
   settings: Settings;
   onChange: (s: Settings) => void;
@@ -11,6 +20,7 @@ interface Props {
 export function SettingsPanel({ settings, onChange }: Props) {
   const [brush, setBrush] = useState(settings.colorOrder[1]?.name ?? settings.colorOrder[0].name);
   const [message, setMessage] = useState<string[]>([]);
+  const [jsonText, setJsonText] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
   const grey = settings.colorOrder[0].name;
 
@@ -39,13 +49,26 @@ export function SettingsPanel({ settings, onChange }: Props) {
     URL.revokeObjectURL(a.href);
   };
 
-  const upload = async (file: File) => {
+  const importText = (text: string, source = '貼り付けたJSON') => {
     try {
-      const { settings: s, warnings } = parseSettings(JSON.parse(await file.text()));
+      const { settings: s, warnings } = parseSettings(JSON.parse(text));
       onChange(s);
-      setMessage([`「${file.name}」を読み込みました`, ...warnings]);
+      setMessage([`${source}を読み込みました`, ...warnings]);
     } catch (e) {
-      setMessage([`読み込みに失敗しました：${e instanceof Error ? e.message : String(e)}`]);
+      setMessage([`読み込めませんでした：${e instanceof Error ? e.message : String(e)}`]);
+    }
+  };
+
+  const upload = async (file: File) => importText(await file.text(), `「${file.name}」`);
+
+  const copyJson = async () => {
+    const text = exportSettings(settings);
+    setJsonText(text);
+    try {
+      await navigator.clipboard.writeText(text);
+      setMessage(['設定をクリップボードにコピーしました']);
+    } catch {
+      setMessage(['コピーできなかったので、下の欄の文字を選択してコピーしてください']);
     }
   };
 
@@ -72,13 +95,11 @@ export function SettingsPanel({ settings, onChange }: Props) {
           ))}
         </div>
         <HandGrid settings={settings} onCellDown={paint} onCellDrag={paint} />
-        <button
-          type="button"
-          className="danger"
-          onClick={() => confirm('169マスの色をすべて消しますか？') && onChange({ ...settings, handColors: {} })}
-        >
-          表をすべてクリア
-        </button>
+        <ConfirmButton
+          label="表をすべてクリア"
+          confirmLabel="169マスの色を消す"
+          onConfirm={() => onChange({ ...settings, handColors: {} })}
+        />
       </section>
 
       <section className="settings-side">
@@ -174,7 +195,7 @@ export function SettingsPanel({ settings, onChange }: Props) {
         <h2>書き出し／読み込み</h2>
         <p className="hint">設定はブラウザに自動保存されます。バックアップや別PCへの移行にはJSONファイルを使ってください。</p>
         <div className="row">
-          <button type="button" onClick={download}>JSONを書き出す</button>
+          {!EMBEDDED && <button type="button" onClick={download}>JSONを書き出す</button>}
           <button type="button" onClick={() => fileRef.current?.click()}>JSONを読み込む</button>
           <input
             ref={fileRef}
@@ -187,19 +208,60 @@ export function SettingsPanel({ settings, onChange }: Props) {
               e.target.value = '';
             }}
           />
-          <button
-            type="button"
-            className="danger"
-            onClick={() => confirm('すべての設定を初期状態に戻しますか？') && onChange(defaultSettings())}
-          >
-            初期状態に戻す
-          </button>
+          <ConfirmButton
+            label="初期状態に戻す"
+            confirmLabel="すべての設定を消す"
+            onConfirm={() => onChange(defaultSettings())}
+          />
         </div>
+        <details className="json-text" open={EMBEDDED}>
+          <summary>ファイルを使わずにコピー／貼り付けで移す</summary>
+          <div className="row">
+            <button type="button" onClick={() => void copyJson()}>今の設定をコピー</button>
+            <button type="button" onClick={() => importText(jsonText)} disabled={!jsonText.trim()}>
+              貼り付けたJSONを読み込む
+            </button>
+          </div>
+          <textarea
+            id="settings-json"
+            value={jsonText}
+            onChange={(e) => setJsonText(e.target.value)}
+            placeholder="書き出したJSONをここに貼り付け"
+            rows={6}
+          />
+        </details>
         {message.map((m) => (
           <p key={m} className="note">{m}</p>
         ))}
       </section>
     </div>
+  );
+}
+
+/** 1回目のクリックで確認表示、2回目で実行する（confirm() が使えない環境向け） */
+function ConfirmButton({ label, confirmLabel, onConfirm }: { label: string; confirmLabel: string; onConfirm: () => void }) {
+  const [armed, setArmed] = useState(false);
+  if (!armed) {
+    return (
+      <button type="button" className="danger" onClick={() => setArmed(true)}>
+        {label}
+      </button>
+    );
+  }
+  return (
+    <span className="confirm">
+      <button
+        type="button"
+        className="danger-solid"
+        onClick={() => {
+          onConfirm();
+          setArmed(false);
+        }}
+      >
+        {confirmLabel}
+      </button>
+      <button type="button" onClick={() => setArmed(false)}>やめる</button>
+    </span>
   );
 }
 
