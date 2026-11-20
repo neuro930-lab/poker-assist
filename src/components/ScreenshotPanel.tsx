@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { explainApiError, readScreenshot, type ScreenResult, type VisionModel } from '../ai/claude';
+import { explainApiError, type ScreenResult } from '../ai/claude';
+import { readScreen, readerNotReadyMessage, readerReady, type Reader } from '../ai/reader';
 import type { Format } from '../logic/yokosawa';
 
 type Media = 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
 const MEDIA: Media[] = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 
 interface Props {
-  apiKey: string;
-  model: VisionModel;
+  reader: Reader;
   format: Format;
   onResult: (r: ScreenResult) => void;
   onNeedKey: () => void;
@@ -37,7 +37,7 @@ async function toBase64(file: Blob): Promise<{ base64: string; mediaType: Media;
   return { base64: dataUrl.slice(dataUrl.indexOf(',') + 1), mediaType: 'image/png', url };
 }
 
-export function ScreenshotPanel({ apiKey, model, format, onResult, onNeedKey }: Props) {
+export function ScreenshotPanel({ reader, format, onResult, onNeedKey }: Props) {
   const [image, setImage] = useState<{ base64: string; mediaType: Media; url: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string[]>([]);
@@ -70,7 +70,7 @@ export function ScreenshotPanel({ apiKey, model, format, onResult, onNeedKey }: 
 
   const analyze = async () => {
     if (!image) return;
-    if (!apiKey) {
+    if (!readerReady(reader)) {
       onNeedKey();
       return;
     }
@@ -78,7 +78,7 @@ export function ScreenshotPanel({ apiKey, model, format, onResult, onNeedKey }: 
     setError('');
     setMessage([]);
     try {
-      const r = await readScreenshot(apiKey, image, format, { model });
+      const r = await readScreen(reader, image, format);
       onResult(r);
       setMessage([`読み取り完了${r.notes ? `：${r.notes}` : ''}`, ...r.warnings]);
     } catch (e) {
@@ -132,7 +132,7 @@ export function ScreenshotPanel({ apiKey, model, format, onResult, onNeedKey }: 
           </button>
         )}
       </div>
-      {!apiKey && <p className="hint">画面解析にはAnthropic APIキーが必要です（設定タブ）。キーがなくても下の欄に手入力すれば判定できます。</p>}
+      {!readerReady(reader) && <p className="hint">{readerNotReadyMessage(reader)}。読み取りなしでも、下の欄に手入力すれば判定できます。</p>}
       {error && <p className="warning">⚠ {error}</p>}
       {message.map((m) => (
         <p key={m} className="note">{m}</p>

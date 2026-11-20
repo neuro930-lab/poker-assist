@@ -1,16 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
-import { coach, explainApiError } from '../ai/claude';
+import { explainApiError } from '../ai/claude';
+import { coachWith, readerReady, type Reader } from '../ai/reader';
 import type { Advice } from '../engine/advisor';
 import type { GameState } from '../engine/state';
 
 interface Props {
-  apiKey: string;
+  reader: Reader;
   state: GameState;
   advice: Advice;
   onNeedKey: () => void;
 }
 
-export function CoachPanel({ apiKey, state, advice, onNeedKey }: Props) {
+export function CoachPanel({ reader, state, advice, onNeedKey }: Props) {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -25,7 +26,7 @@ export function CoachPanel({ apiKey, state, advice, onNeedKey }: Props) {
   }, [key]);
 
   const run = async () => {
-    if (!apiKey) {
+    if (!readerReady(reader)) {
       onNeedKey();
       return;
     }
@@ -36,7 +37,7 @@ export function CoachPanel({ apiKey, state, advice, onNeedKey }: Props) {
     setText('');
     setError('');
     try {
-      await coach(apiKey, state, advice, (t) => setText((x) => x + t), ac.signal);
+      await coachWith(reader, state, advice, (t) => setText((x) => x + t), ac.signal);
     } catch (e) {
       if (!ac.signal.aborted) setError(explainApiError(e));
     } finally {

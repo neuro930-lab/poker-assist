@@ -3,6 +3,9 @@ import { VISION_MODELS, loadApiKey, loadVisionModel, saveApiKey, saveVisionModel
 import { AdvicePanel } from './components/AdvicePanel';
 import { CoachPanel } from './components/CoachPanel';
 import { LivePanel } from './components/LivePanel';
+import { mergeWithPrevious } from './ai/screen';
+import { LOCAL_MODELS, bridgeHealth, type BridgeStatus, type LocalModel } from './ai/local';
+import { loadLocalModel, loadReadMode, saveLocalModel, saveReadMode, type ReadMode, type Reader } from './ai/reader';
 import { PreflopTrainer } from './components/PreflopTrainer';
 import { ScreenshotPanel } from './components/ScreenshotPanel';
 import { SettingsPanel } from './components/SettingsPanel';
@@ -38,6 +41,28 @@ export default function App() {
   const [showRange, setShowRange] = useState(true);
   const [visionModel, setVisionModel] = useState<VisionModel>(loadVisionModel);
   const [input, setInput] = useState<'live' | 'image'>('live');
+  const [bridge, setBridge] = useState<BridgeStatus>({ ok: false });
+  const [savedMode, setSavedMode] = useState<ReadMode | null>(loadReadMode);
+  const [localModel, setLocalModel] = useState<LocalModel>(loadLocalModel);
+
+  // 中継プログラム（PCのClaude）につながっているか。つながっていなければ時々確認し直す
+  useEffect(() => {
+    let alive = true;
+    const check = async () => {
+      const st = await bridgeHealth();
+      if (alive) setBridge(st);
+    };
+    void check();
+    const id = window.setInterval(check, 15000);
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+    };
+  }, []);
+
+  // 明示的に選んでいなければ、PCのClaudeが使えるときはそちらを優先
+  const mode: ReadMode = savedMode ?? (bridge.ok ? 'local' : 'api');
+  const reader: Reader = { mode, apiKey, apiModel: visionModel, localModel, bridgeOk: bridge.ok };
 
   useEffect(() => saveSettings('ring', settings.ring), [settings.ring]);
   useEffect(() => saveSettings('tournament', settings.tournament), [settings.tournament]);
@@ -59,7 +84,7 @@ export default function App() {
   const onScreen = (r: ScreenResult) => {
     const next: GameState = { ...emptyState(r.state.format ?? format), ...r.state };
     if (next.format !== format) setFormat(next.format);
-    setState(next);
+    setState((prev) => mergeWithPrevious(prev, next));
   };
 
   const fmtButtons = (
@@ -102,9 +127,9 @@ export default function App() {
                 </span>
               </h2>
               {input === 'live' ? (
-                <LivePanel apiKey={apiKey} model={visionModel} format={format} onResult={onScreen} onNeedKey={() => setTab('settings')} />
+                <LivePanel reader={reader} format={format} onResult={onScreen} onNeedKey={() => setTab('settings')} />
               ) : (
-                <ScreenshotPanel apiKey={apiKey} model={visionModel} format={format} onResult={onScreen} onNeedKey={() => setTab('settings')} />
+                <ScreenshotPanel reader={reader} format={format} onResult={onScreen} onNeedKey={() => setTab('settings')} />
               )}
             </section>
             <section className="panel">
@@ -128,7 +153,7 @@ export default function App() {
               showRange={showRange}
               onToggleRange={setShowRange}
             />
-            <CoachPanel apiKey={apiKey} state={{ ...state, format }} advice={advice} onNeedKey={() => setTab('settings')} />
+            <CoachPanel reader={reader} state={{ ...state, format }} advice={advice} onNeedKey={() => setTab('settings')} />
           </div>
         </main>
       )}
@@ -138,6 +163,47 @@ export default function App() {
       {tab === 'settings' && (
         <>
           <section className="panel api-key">
+            <h2>画面の読み取り・AIコーチをどこで動かすか</h2>
+            <div className="row">
+              <label className="inline">
+                <input
+                  type="radio"
+                  name="read-mode"
+                  checked={mode === 'local'}
+                  onChange={() => { setSavedMode('local'); saveReadMode('local'); }}
+                />
+                PCのClaude（Claude Code CLI・Maxプラン等。APIキー不要）
+              </label>
+              <label className="inline">
+                <input
+                  type="radio"
+                  name="read-mode"
+                  checked={mode === 'api'}
+                  onChange={() => { setSavedMode('api'); saveReadMode('api'); }}
+                />
+                Anthropic APIキー
+              </label>
+            </div>
+            {mode === 'local' && (
+              <>
+                <p className={bridge.ok ? 'note' : 'warning'}>
+                  {bridge.ok
+                    ? `✓ PCのClaudeに接続中${bridge.version ? `（${bridge.version}）` : ''}`
+                    : '⚠ 接続されていません。start-poker-assist.bat をダブルクリックして起動したアプリで開いてください（GitHub Pages のサイトからは使えません）'}
+                </p>
+                <label className="inline">
+                  読み取りのモデル
+                  <select value={localModel} onChange={(e) => { const m = e.target.value as LocalModel; setLocalModel(m); saveLocalModel(m); }}>
+                    {LOCAL_MODELS.map((m) => (
+                      <option key={m.id} value={m.id}>{m.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <p className="hint">プランの利用枠を使います（追加料金なし）。AIコーチは Opus で動きます。</p>
+              </>
+            )}
+          </section>
+          <section className="panel api-key" hidden={mode !== 'api'}>
             <h2>Anthropic APIキー（画面解析・AIコーチ用）</h2>
             <p className="hint">
               キーはこのブラウザ内（localStorage）にだけ保存され、api.anthropic.com に直接送られます。自分のPCで使う前提です。共有PCでは使い終わったら消してください。

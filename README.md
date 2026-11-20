@@ -4,6 +4,25 @@
 
 多くのオンラインポーカーサイトは、対人戦で補助ツールを使うことを規約で禁止しています。**AI戦での練習・ハンドの振り返り・学習**に使ってください。
 
+## 自分のPCで使う（Claude Code のMaxプラン等で、APIキーなし・追加料金なし）
+
+PCに Claude Code（`claude` コマンド）が入っていてログイン済みなら、画面の読み取りとAIコーチをそのプランの利用枠で動かせます。
+
+**最初に1回だけ**
+1. Node.js（LTS版）をインストール：https://nodejs.org
+2. Git をインストール（https://git-scm.com）して、好きな場所で次を実行
+   ```bash
+   git clone https://github.com/neuro930-lab/poker-assist.git
+   ```
+3. できた `poker-assist` フォルダの **`start-poker-assist.bat` をダブルクリック**。ブラウザが自動で開きます（デスクトップにショートカットを作っておくと便利です）
+
+**毎回**：`start-poker-assist.bat` をダブルクリックするだけ（起動のたびに最新版に更新されます）。終わるときは黒いウィンドウを閉じます。
+
+- 「設定」タブで「PCのClaude」が選ばれ「接続中」と出ていればOK。読み取りのモデル（Haiku / Sonnet / Opus）も選べます
+- 速くするために、claude を起動したままにして画像を次々に送ります（1回あたり3〜5秒ほど。画面共有を始めた直後の1回目だけ少し長め）
+- 環境変数 `ANTHROPIC_API_KEY` があっても使わず、ログイン中のプランで動かします
+- プランの利用上限（数時間ごとの枠）を消費します。読み取り間隔を長めにすると節約できます
+
 ## 使い方
 
 ```bash
@@ -32,7 +51,7 @@ npm run build    # dist/ に静的ファイルを出力
 
 `public/yokosawa-ranges.xlsx`（アプリの「Excel版をダウンロード」）。リング／トーナメントの2シートで、D2 に手札（例：AKo、65s、77）を入れるとそのマスが青くなり、D3 でポジションを選ぶと参加できるか表示します。表のデータを変えたら `python3 scripts/make_yokosawa_xlsx.py` で作り直してください。
 
-画面解析とAIコーチには Anthropic APIキーが必要です（「設定」タブで入力）。キーはブラウザの localStorage にだけ保存され、api.anthropic.com に直接送られます。自分のPCで使う前提の作りです。サーバーに公開する場合は、キーをバックエンド側に置く構成に変えてください。
+GitHub Pages のサイトで使う場合、画面解析とAIコーチには Anthropic APIキーが必要です（「設定」タブで入力）。キーはブラウザの localStorage にだけ保存され、api.anthropic.com に直接送られます。自分のPCで使う前提の作りです。サーバーに公開する場合は、キーをバックエンド側に置く構成に変えてください。
 
 ## 判定の仕組み
 
@@ -51,5 +70,8 @@ npm run build    # dist/ に静的ファイルを出力
 - `src/logic/` …… ヨコサワ表のデータ・プリフロップ判定・ポジション・設定
 - `src/engine/` …… カード、役判定、勝率計算（モンテカルロ／リバーは厳密）、ドロー・ボード分析、レンジ推定、推奨アクション（`advisor.ts`）
 - `src/live/` …… 画面の変化検知（いつAIに読ませるか）
-- `src/ai/claude.ts` …… 画面解析（Claude の画像入力＋構造化出力）とAIコーチ（ストリーミング）
+- `src/ai/screen.ts` …… 読み取り内容（席の並び・Dマーク・ベット額）から、ポジション・ポット・コール額・レイザーを計算
+- `src/ai/claude.ts` …… APIキーでの画面解析とAIコーチ
+- `src/ai/local.ts`・`bridge/server.mjs` …… PCの Claude Code CLI で読み取る中継プログラム
+- `start-poker-assist.bat` …… Windows でダブルクリックして起動
 - `src/components/` …… 画面（解析タブ・プリフロップ練習・設定）
