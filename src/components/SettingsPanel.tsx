@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { ALL_POSITIONS } from '../logic/positions';
 import { defaultSettings, exportSettings, parseSettings, type Settings } from '../logic/settings';
+import { FORMAT_LABELS, type Format } from '../logic/yokosawa';
 import { HandGrid, textColorFor } from './HandGrid';
 
 /** 埋め込み表示（iframe内）ではファイルの保存が許可されないことがあるため、コピーで書き出す */
@@ -13,11 +14,12 @@ const EMBEDDED = (() => {
 })();
 
 interface Props {
+  format: Format;
   settings: Settings;
   onChange: (s: Settings) => void;
 }
 
-export function SettingsPanel({ settings, onChange }: Props) {
+export function SettingsPanel({ format, settings, onChange }: Props) {
   const [brush, setBrush] = useState(settings.colorOrder[1]?.name ?? settings.colorOrder[0].name);
   const [message, setMessage] = useState<string[]>([]);
   const [jsonText, setJsonText] = useState('');
@@ -44,14 +46,14 @@ export function SettingsPanel({ settings, onChange }: Props) {
     const blob = new Blob([exportSettings(settings)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `poker-assist-settings-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `poker-assist-${format}-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(a.href);
   };
 
   const importText = (text: string, source = '貼り付けたJSON') => {
     try {
-      const { settings: s, warnings } = parseSettings(JSON.parse(text));
+      const { settings: s, warnings } = parseSettings(JSON.parse(text), format);
       onChange(s);
       setMessage([`${source}を読み込みました`, ...warnings]);
     } catch (e) {
@@ -77,9 +79,9 @@ export function SettingsPanel({ settings, onChange }: Props) {
   return (
     <div className="settings">
       <section className="settings-editor">
-        <h2>レンジ表エディタ</h2>
+        <h2>レンジ表エディタ（{FORMAT_LABELS[format]}）</h2>
         <p className="hint">
-          色を選んでマスをクリック（ドラッグで連続して塗れます）。入力済み {filled}/169、未入力はグレー扱い。
+          初期値はヨコサワ表そのものです。色を選んでマスをクリックすると自分用に調整できます（ドラッグで連続して塗れます）。グレー以外 {filled}/169。
         </p>
         <div className="palette">
           {settings.colorOrder.map((c, lv) => (
@@ -87,7 +89,11 @@ export function SettingsPanel({ settings, onChange }: Props) {
               key={c.name}
               type="button"
               className={c.name === brush ? 'active' : ''}
-              style={{ background: c.hex, color: textColorFor(c.hex) }}
+              style={{
+                background: c.hex,
+                color: textColorFor(c.hex),
+                ...(c.outline ? { borderColor: c.outline, borderWidth: 3 } : {}),
+              }}
               onClick={() => setBrush(c.name)}
             >
               {lv}：{c.name}
@@ -96,9 +102,12 @@ export function SettingsPanel({ settings, onChange }: Props) {
         </div>
         <HandGrid settings={settings} onCellDown={paint} onCellDrag={paint} />
         <ConfirmButton
-          label="表をすべてクリア"
-          confirmLabel="169マスの色を消す"
-          onConfirm={() => onChange({ ...settings, handColors: {} })}
+          label="ヨコサワ表に戻す"
+          confirmLabel="表とポジションの基準を初期値に戻す"
+          onConfirm={() => {
+            const d = defaultSettings(format);
+            onChange({ ...settings, colorOrder: d.colorOrder, handColors: d.handColors, positionBaseColors: d.positionBaseColors });
+          }}
         />
       </section>
 
@@ -134,16 +143,9 @@ export function SettingsPanel({ settings, onChange }: Props) {
         <table className="form-table">
           <tbody>
             <tr>
-              <th>BBのコール基準色</th>
+              <th>BBディフェンス：レイザーの基準から何段下までコール</th>
               <td>
-                <select
-                  value={settings.bbCallColor}
-                  onChange={(e) => onChange({ ...settings, bbCallColor: e.target.value })}
-                >
-                  {settings.colorOrder.slice(1).map((c) => (
-                    <option key={c.name} value={c.name}>{c.name}以上</option>
-                  ))}
-                </select>
+                <StepInput min={0} value={settings.bbDefendSteps} onChange={(v) => onChange({ ...settings, bbDefendSteps: v })} />
               </td>
             </tr>
             <tr>
@@ -211,7 +213,7 @@ export function SettingsPanel({ settings, onChange }: Props) {
           <ConfirmButton
             label="初期状態に戻す"
             confirmLabel="すべての設定を消す"
-            onConfirm={() => onChange(defaultSettings())}
+            onConfirm={() => onChange(defaultSettings(format))}
           />
         </div>
         <details className="json-text" open={EMBEDDED}>
@@ -265,16 +267,16 @@ function ConfirmButton({ label, confirmLabel, onConfirm }: { label: string; conf
   );
 }
 
-function StepInput({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+function StepInput({ value, onChange, min = 1 }: { value: number; onChange: (v: number) => void; min?: number }) {
   return (
     <input
       type="number"
-      min={1}
+      min={min}
       max={6}
       value={value}
       onChange={(e) => {
         const v = Number(e.target.value);
-        if (Number.isInteger(v) && v >= 1) onChange(v);
+        if (Number.isInteger(v) && v >= min) onChange(v);
       }}
     />
   );

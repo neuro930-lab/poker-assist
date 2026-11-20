@@ -1,6 +1,6 @@
 import { ALL_HANDS, TOTAL_COMBOS, combosOf } from './hands';
 import { actionIndex, displayName, positionOfSeat, type Position } from './positions';
-import { colorAt, handLevel, levelOf, maxLevel, positionLevel, type Settings } from './settings';
+import { colorAt, handLevel, maxLevel, positionLevel, type Settings } from './settings';
 
 export type Situation = 'normal' | 'vs3bet' | 'vs4bet';
 
@@ -200,17 +200,19 @@ export function decide(input: DecisionInput): Decision {
     return res;
   }
 
-  // BB判定
-  const bbMin = levelOf(settings, settings.bbCallColor) ?? 2;
+  // BB判定：すでに1BB払っていて最後に行動できるため、レイザーの基準より bbDefendSteps 段下までコール。
+  // 「BBのみコールOK」の最下段（レベル1）は BTN・SB のレイズに対してだけ。
+  const late = oppPos === 'BTN' || oppPos === 'SB';
+  const bbMin = Math.max(late ? 1 : 2, R - settings.bbDefendSteps);
   if (diff >= step) {
     res.action = '3bet';
     res.reason = vsRaiseReason;
   } else if (H >= bbMin) {
     res.action = 'call';
-    res.reason = `${handText}、BBは${name(bbMin)}以上ならどこからのレイズでもコール可`;
+    res.reason = `${handText}、BBは${label(oppPos)}のレイズに${name(bbMin)}以上でコール可（オッズが良く、最後に行動できるため）`;
   } else {
     res.action = 'fold';
-    res.reason = `${handText}、BBのコール基準（${name(bbMin)}）未満なのでフォールド`;
+    res.reason = `${handText}、BBの${label(oppPos)}に対するコール基準（${name(bbMin)}以上）に届かないのでフォールド`;
   }
   res.notes.push(`通常のvsレイズ判定：${ACTION_LABELS[vsRaise]}（${diffText}）`);
   return res;

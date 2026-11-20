@@ -1,201 +1,178 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { HandGrid } from './components/HandGrid';
-import { ResultPanel } from './components/ResultPanel';
+import { useEffect, useMemo, useState } from 'react';
+import { VISION_MODELS, loadApiKey, loadVisionModel, saveApiKey, saveVisionModel, type ScreenResult, type VisionModel } from './ai/claude';
+import { AdvicePanel } from './components/AdvicePanel';
+import { CoachPanel } from './components/CoachPanel';
+import { LivePanel } from './components/LivePanel';
+import { PreflopTrainer } from './components/PreflopTrainer';
+import { ScreenshotPanel } from './components/ScreenshotPanel';
 import { SettingsPanel } from './components/SettingsPanel';
-import { TableView } from './components/TableView';
-import { decide, isSelectableOpponent, type Situation } from './logic/decide';
-import { MAX_PLAYERS, MIN_PLAYERS, nextButton } from './logic/positions';
+import { StateEditor } from './components/StateEditor';
+import { YokosawaView } from './components/YokosawaView';
+import { advise } from './engine/advisor';
+import { emptyState, type GameState } from './engine/state';
 import { loadSettings, saveSettings, type Settings } from './logic/settings';
+import { FORMAT_LABELS, type Format } from './logic/yokosawa';
 
-const PLAYERS_KEY = 'poker-assist.players.v1';
+type Tab = 'analyze' | 'trainer' | 'settings';
+const FORMAT_KEY = 'poker-assist.format.v1';
 
-function loadPlayers(): number {
+function loadFormat(): Format {
   try {
-    const v = Number(localStorage.getItem(PLAYERS_KEY));
-    if (Number.isInteger(v) && v >= MIN_PLAYERS && v <= MAX_PLAYERS) return v;
+    return localStorage.getItem(FORMAT_KEY) === 'tournament' ? 'tournament' : 'ring';
   } catch {
-    // 読めなければ初期値
+    return 'ring';
   }
-  return MAX_PLAYERS;
 }
 
-const SITUATIONS: { id: Situation; label: string }[] = [
-  { id: 'normal', label: '通常' },
-  { id: 'vs3bet', label: 'vs3ベット' },
-  { id: 'vs4bet', label: 'vs4ベット' },
-];
-
 export default function App() {
-  const [tab, setTab] = useState<'main' | 'settings'>(() =>
-    typeof location !== 'undefined' && location.hash === '#settings' ? 'settings' : 'main',
+  const [tab, setTab] = useState<Tab>(() =>
+    typeof location !== 'undefined' && location.hash === '#settings' ? 'settings' : 'analyze',
   );
-  const [settings, setSettings] = useState<Settings>(loadSettings);
-  const [players, setPlayers] = useState(loadPlayers);
-  const [btnSeat, setBtnSeat] = useState(0);
-  const [mySeat, setMySeat] = useState<number | null>(null);
-  const [hand, setHand] = useState<string | null>(null);
-  const [opponentSeat, setOpponentSeat] = useState<number | null>(null);
-  const [situation, setSituation] = useState<Situation>('normal');
+  const [format, setFormat] = useState<Format>(loadFormat);
+  const [settings, setSettings] = useState<Record<Format, Settings>>(() => ({
+    ring: loadSettings('ring'),
+    tournament: loadSettings('tournament'),
+  }));
+  const [state, setState] = useState<GameState>(() => emptyState(loadFormat()));
+  const [apiKey, setApiKey] = useState(loadApiKey);
+  const [showRange, setShowRange] = useState(true);
+  const [visionModel, setVisionModel] = useState<VisionModel>(loadVisionModel);
+  const [input, setInput] = useState<'live' | 'image'>('live');
 
-  useEffect(() => saveSettings(settings), [settings]);
+  useEffect(() => saveSettings('ring', settings.ring), [settings.ring]);
+  useEffect(() => saveSettings('tournament', settings.tournament), [settings.tournament]);
   useEffect(() => {
     try {
-      localStorage.setItem(PLAYERS_KEY, String(players));
+      localStorage.setItem(FORMAT_KEY, format);
     } catch {
       // 保存できなくても動作は続ける
     }
-  }, [players]);
+  }, [format]);
 
-  const selectable = useCallback(
-    (seat: number) => isSelectableOpponent(seat, mySeat, btnSeat, players, situation),
-    [mySeat, btnSeat, players, situation],
-  );
-
-  // 席・状況が変わって相手指定が成り立たなくなったら解除する
-  useEffect(() => {
-    if (opponentSeat !== null && !selectable(opponentSeat)) setOpponentSeat(null);
-  }, [opponentSeat, selectable]);
-
-  const decision = useMemo(
-    () => decide({ players, btnSeat, mySeat, hand, opponentSeat, situation, settings }),
-    [players, btnSeat, mySeat, hand, opponentSeat, situation, settings],
-  );
-  const highlight = useMemo(
-    () => (decision.opponentRange ? new Set(decision.opponentRange.hands) : undefined),
-    [decision],
-  );
-
-  const resetHand = useCallback(() => {
-    setHand(null);
-    setOpponentSeat(null);
-    setSituation('normal');
-  }, []);
-
-  const nextHand = useCallback(() => {
-    setBtnSeat((b) => nextButton(b, players));
-    resetHand();
-  }, [players, resetHand]);
-
-  const changePlayers = (n: number) => {
-    setPlayers(n);
-    setBtnSeat((b) => (b < n ? b : 0));
-    setMySeat((s) => (s !== null && s < n ? s : null));
-    setOpponentSeat(null);
+  const changeFormat = (f: Format) => {
+    setFormat(f);
+    setState((s) => ({ ...s, format: f }));
   };
 
-  const onSeatClick = (seat: number) => {
-    if (mySeat === null) setMySeat(seat);
-    else if (seat === mySeat) {
-      setMySeat(null);
-      setOpponentSeat(null);
-    } else if (selectable(seat)) setOpponentSeat((o) => (o === seat ? null : seat));
+  const advice = useMemo(() => advise({ ...state, format }, settings), [state, format, settings]);
+
+  const onScreen = (r: ScreenResult) => {
+    const next: GameState = { ...emptyState(r.state.format ?? format), ...r.state };
+    if (next.format !== format) setFormat(next.format);
+    setState(next);
   };
 
-  const onSeatRightClick = (seat: number) => {
-    setMySeat(seat);
-    if (seat === opponentSeat) setOpponentSeat(null);
-  };
-
-  useEffect(() => {
-    if (tab !== 'main') return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
-      if (e.key === 'n' || e.key === 'N') nextHand();
-      else if (e.key === 'Escape') resetHand();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [tab, nextHand, resetHand]);
-
-  const configured = Object.keys(settings.positionBaseColors).length > 0;
+  const fmtButtons = (
+    <div className="format-toggle" role="group" aria-label="ゲームの種類">
+      {(['ring', 'tournament'] as Format[]).map((f) => (
+        <button key={f} type="button" className={f === format ? 'active' : ''} onClick={() => changeFormat(f)}>
+          {FORMAT_LABELS[f]}
+        </button>
+      ))}
+    </div>
+  );
 
   return (
     <div className="app">
       <header>
-        <h1>Poker Assist <small>ヨコサワレンジ・プリフロップ判定</small></h1>
+        <h1>
+          Poker Assist <small>画面解析 × 最適プレー × ヨコサワレンジ</small>
+        </h1>
+        {fmtButtons}
         <nav>
-          <button type="button" className={tab === 'main' ? 'active' : ''} onClick={() => setTab('main')}>判定</button>
+          <button type="button" className={tab === 'analyze' ? 'active' : ''} onClick={() => setTab('analyze')}>解析</button>
+          <button type="button" className={tab === 'trainer' ? 'active' : ''} onClick={() => setTab('trainer')}>プリフロップ練習</button>
           <button type="button" className={tab === 'settings' ? 'active' : ''} onClick={() => setTab('settings')}>設定</button>
         </nav>
       </header>
 
-      {tab === 'settings' ? (
-        <SettingsPanel settings={settings} onChange={setSettings} />
-      ) : (
-        <main>
-          {!configured && (
-            <p className="banner">
-              レンジ表が未入力です。「設定」タブで、公式のハンドレンジ表を見ながら色とポジションの基準色を入力してください。
-            </p>
-          )}
-          <div className="top">
-            <div className="table-pane">
-              <TableView
-                players={players}
-                btnSeat={btnSeat}
-                mySeat={mySeat}
-                opponentSeat={opponentSeat}
-                labelFirstSeatAsUtg={settings.labelFirstSeatAsUtg}
-                isSelectable={selectable}
-                onSeatClick={onSeatClick}
-                onSeatRightClick={onSeatRightClick}
-              />
-              <p className="hint">
-                {mySeat === null
-                  ? '自分の席をクリック'
-                  : situation === 'vs3bet'
-                    ? '3ベットした人の席をクリック'
-                    : situation === 'vs4bet'
-                      ? 'オープン→4ベットした人の席をクリック'
-                      : 'レイズした人がいればその席をクリック（もう一度で解除）'}
-                ／自分の席をクリックで選び直し、右クリックで自分の席に変更
-              </p>
-            </div>
-            <div className="grid-pane">
-              <HandGrid
-                settings={settings}
-                selected={hand}
-                highlight={highlight}
-                onCellDown={(h) => setHand((cur) => (cur === h ? null : h))}
-              />
-              <p className="legend">
-                <span className="lg-me">青枠＝自分の手札</span>
-                <span className="lg-range">橙枠＝相手の想定レンジ</span>
-              </p>
-            </div>
+      {tab === 'analyze' && (
+        <main className={`analyze${input === 'live' ? ' live-mode' : ''}`}>
+          <div className="col">
+            <section className="panel">
+              <h2>
+                ① ゲーム画面
+                <span className="input-tabs" role="group" aria-label="入力方法">
+                  <button type="button" className={input === 'live' ? 'active' : ''} onClick={() => setInput('live')}>
+                    リアルタイム（画面共有）
+                  </button>
+                  <button type="button" className={input === 'image' ? 'active' : ''} onClick={() => setInput('image')}>
+                    画像を貼り付け
+                  </button>
+                </span>
+              </h2>
+              {input === 'live' ? (
+                <LivePanel apiKey={apiKey} model={visionModel} format={format} onResult={onScreen} onNeedKey={() => setTab('settings')} />
+              ) : (
+                <ScreenshotPanel apiKey={apiKey} model={visionModel} format={format} onResult={onScreen} onNeedKey={() => setTab('settings')} />
+              )}
+            </section>
+            <section className="panel">
+              <details className="editor-details" open={input === 'image'}>
+                <summary>局面（読み取り結果の確認・手入力）</summary>
+                <button type="button" className="small-btn" onClick={() => setState(emptyState(format))}>クリア</button>
+                <StateEditor
+                  state={state}
+                  labelFirstSeatAsUtg={settings[format].labelFirstSeatAsUtg}
+                  onChange={setState}
+                />
+              </details>
+            </section>
           </div>
-
-          <div className="controls">
-            <div className="group">
-              <span className="label">人数</span>
-              {Array.from({ length: MAX_PLAYERS - MIN_PLAYERS + 1 }, (_, i) => i + MIN_PLAYERS).map((n) => (
-                <button key={n} type="button" className={n === players ? 'active' : ''} onClick={() => changePlayers(n)}>
-                  {n}
-                </button>
-              ))}
-            </div>
-            <div className="group">
-              <span className="label">状況</span>
-              {SITUATIONS.map((s) => (
-                <button
-                  key={s.id}
-                  type="button"
-                  className={s.id === situation ? 'active' : ''}
-                  onClick={() => setSituation(s.id)}
-                >
-                  {s.label}
-                </button>
-              ))}
-            </div>
-            <div className="group">
-              <button type="button" onClick={resetHand} title="Esc">リセット (Esc)</button>
-              <button type="button" className="primary" onClick={nextHand} title="N">次のハンド (N)</button>
-            </div>
+          <div className="col">
+            <AdvicePanel advice={advice} />
+            <YokosawaView
+              format={format}
+              settings={settings[format]}
+              advice={advice}
+              showRange={showRange}
+              onToggleRange={setShowRange}
+            />
+            <CoachPanel apiKey={apiKey} state={{ ...state, format }} advice={advice} onNeedKey={() => setTab('settings')} />
           </div>
-
-          <ResultPanel decision={decision} settings={settings} />
         </main>
+      )}
+
+      {tab === 'trainer' && <PreflopTrainer settings={settings[format]} active />}
+
+      {tab === 'settings' && (
+        <>
+          <section className="panel api-key">
+            <h2>Anthropic APIキー（画面解析・AIコーチ用）</h2>
+            <p className="hint">
+              キーはこのブラウザ内（localStorage）にだけ保存され、api.anthropic.com に直接送られます。自分のPCで使う前提です。共有PCでは使い終わったら消してください。
+            </p>
+            <div className="row">
+              <input
+                type="password"
+                autoComplete="off"
+                placeholder="sk-ant-..."
+                value={apiKey}
+                onChange={(e) => {
+                  setApiKey(e.target.value.trim());
+                  saveApiKey(e.target.value.trim());
+                }}
+              />
+              {apiKey && (
+                <button type="button" className="danger" onClick={() => { setApiKey(''); saveApiKey(''); }}>
+                  キーを消す
+                </button>
+              )}
+            </div>
+            <h2>画面読み取りのモデル</h2>
+            <select value={visionModel} onChange={(e) => { const m = e.target.value as VisionModel; setVisionModel(m); saveVisionModel(m); }}>
+              {VISION_MODELS.map((m) => (
+                <option key={m.id} value={m.id}>{m.label}</option>
+              ))}
+            </select>
+            <p className="hint">リアルタイムで遅く感じるときは Sonnet / Haiku に。読み間違いが多いときは Opus に。AIコーチは常に Opus 5.5 です。</p>
+          </section>
+          <SettingsPanel
+            format={format}
+            settings={settings[format]}
+            onChange={(s) => setSettings((all) => ({ ...all, [format]: s }))}
+          />
+        </>
       )}
     </div>
   );
