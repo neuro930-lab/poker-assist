@@ -44,7 +44,11 @@ export function HandGrid({ settings, selected, highlight, onCellDown, onCellDrag
               key={hand}
               type="button"
               className={cls.join(' ')}
-              style={{ background: color.hex, color: textColorFor(color.hex) }}
+              style={{
+                background: color.hex,
+                color: textColorFor(color.hex),
+                ...(color.outline ? { borderColor: color.outline, borderWidth: 3 } : {}),
+              }}
               title={`${hand}：${color.name}`}
               onMouseDown={(e) => {
                 if (e.button !== 0) return;

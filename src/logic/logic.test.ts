@@ -7,6 +7,7 @@ import { defaultSettings, parseSettings, handLevel, type Settings } from './sett
 /** テスト専用の色データ（実際のヨコサワ表ではない） */
 function testSettings(): Settings {
   const s = defaultSettings();
+  s.colorOrder = ['グレー', '白', '水色', '緑', '黄', '赤', '紺'].map((name) => ({ name, hex: '#cccccc' }));
   s.positionBaseColors = {
     UTG: '赤', 'UTG+1': '黄', MP: '黄', LJ: '緑', HJ: '緑', CO: '水色', BTN: '白', SB: '水色',
   };
@@ -127,18 +128,24 @@ describe('BB判定', () => {
   it('2つ上 → 3ベット', () => {
     expect(decide(input({ mySeat: SEAT.BB, hand: 'AKs', opponentSeat: SEAT.HJ })).action).toBe('3bet'); // 赤 vs 緑
   });
-  it('水色以上ならどこからでもコール（通常判定も併記）', () => {
-    const d = decide(input({ mySeat: SEAT.BB, hand: 'A5s', opponentSeat: SEAT.UTG }));
+  it('UTGのレイズには1段下（黄）までコール（通常判定も併記）', () => {
+    const d = decide(input({ mySeat: SEAT.BB, hand: 'AQs', opponentSeat: SEAT.UTG })); // 黄 vs 赤
     expect(d.action).toBe('call');
     expect(d.notes.join()).toContain('フォールド');
   });
-  it('水色未満 → フォールド', () => {
-    expect(decide(input({ mySeat: SEAT.BB, hand: 'K9o', opponentSeat: SEAT.BTN })).action).toBe('fold');
+  it('2段下 → フォールド', () => {
+    expect(decide(input({ mySeat: SEAT.BB, hand: 'A5s', opponentSeat: SEAT.UTG })).action).toBe('fold');
   });
-  it('BBのコール基準色は設定で変更できる', () => {
+  it('BTNのレイズには最下段（レベル1）でもコール', () => {
+    expect(decide(input({ mySeat: SEAT.BB, hand: 'K9o', opponentSeat: SEAT.BTN })).action).toBe('call');
+  });
+  it('最下段はBTN・SB以外にはコールしない', () => {
+    expect(decide(input({ mySeat: SEAT.BB, hand: 'K9o', opponentSeat: SEAT.CO })).action).toBe('fold');
+  });
+  it('bbDefendSteps は設定で変更できる', () => {
     const s = testSettings();
-    s.bbCallColor = '白';
-    expect(decide(input({ mySeat: SEAT.BB, hand: 'K9o', opponentSeat: SEAT.UTG, settings: s })).action).toBe('call');
+    s.bbDefendSteps = 0;
+    expect(decide(input({ mySeat: SEAT.BB, hand: 'AQs', opponentSeat: SEAT.UTG, settings: s })).action).toBe('fold');
   });
 });
 
@@ -171,7 +178,7 @@ describe('vs3ベット／vs4ベット', () => {
 
 describe('想定レンジの割合', () => {
   it('AAのみ = 6/1326 ≒ 0.45%', () => {
-    const s = defaultSettings();
+    const s = testSettings();
     s.handColors = { AA: '紺' };
     const r = buildRange(s, 6, 'x');
     expect(r.combos).toBe(6);
@@ -187,7 +194,7 @@ describe('想定レンジの割合', () => {
 describe('設定の読み込み', () => {
   it('不明な色・ハンドは警告して捨てる', () => {
     const { settings, warnings } = parseSettings({
-      handColors: { AKs: '赤', XYz: '赤', QQ: '紫' },
+      handColors: { AKs: '赤', XYz: '赤', QQ: '紺' },
       positionBaseColors: { BTN: '白' },
       reraiseStep: 0,
     });
@@ -198,5 +205,36 @@ describe('設定の読み込み', () => {
   });
   it('オブジェクト以外はエラー', () => {
     expect(() => parseSettings([1, 2])).toThrow();
+  });
+});
+
+describe('ヨコサワ表（内蔵）', () => {
+  it('リング：代表的なマス', () => {
+    const s = defaultSettings('ring');
+    expect(s.handColors.AA).toBe('紫');
+    expect(s.handColors.AJo).toBe('黄');
+    expect(s.handColors.Q5s).toBe('BB枠');
+    expect(s.handColors.A6o).toBe('BB枠');
+    expect(s.handColors['98o']).toBe('BB枠');
+    expect(s.handColors.J5s).toBeUndefined();
+    expect(s.handColors['22']).toBe('水色');
+    expect(Object.keys(s.handColors).length).toBe(169 - 85);
+  });
+  it('トーナメント：ピンクとBTN枠', () => {
+    const s = defaultSettings('tournament');
+    expect(s.handColors.K8o).toBe('ピンク');
+    expect(s.handColors.A2o).toBe('ピンク');
+    expect(s.handColors.J7o).toBeUndefined();
+    expect(s.handColors.T7s).toBe('BTN枠');
+    expect(s.positionBaseColors.CO).toBe('白');
+  });
+  it('リング：UTGでAJo（黄）はフォールド、HJならレイズ', () => {
+    const s = defaultSettings('ring');
+    expect(decide(input({ settings: s, mySeat: SEAT.UTG, hand: 'AJo' })).action).toBe('fold');
+    expect(decide(input({ settings: s, mySeat: SEAT.HJ, hand: 'AJo' })).action).toBe('raise');
+  });
+  it('トーナメント：BBはBTNのレイズにK8o（ピンク）でコール', () => {
+    const s = defaultSettings('tournament');
+    expect(decide(input({ settings: s, mySeat: SEAT.BB, hand: 'K8o', opponentSeat: SEAT.BTN })).action).toBe('call');
   });
 });

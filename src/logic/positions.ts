@@ -42,3 +42,21 @@ export function displayName(pos: Position, players: number, labelFirstSeatAsUtg:
   }
   return pos;
 }
+
+/** ポジション → 座席番号（seat 0..players-1、BTN の席を btnSeat として） */
+export function seatOfPosition(pos: Position, players: number, btnSeat = 0): number | null {
+  const order = positionsFor(players);
+  const i = order.indexOf(pos);
+  if (i < 0) return null;
+  const btnIndex = order.indexOf('BTN');
+  return (btnSeat + i - btnIndex + players * 2) % players;
+}
+
+/** フロップ以降の行動順（0 = 最初）。SB → BB → UTG … → BTN */
+export function postflopOrder(pos: Position, players: number): number {
+  const order = positionsFor(players);
+  if (players === 2) return pos === 'BB' ? 0 : 1; // ヘッズアップはBTN（=SB）が後
+  const rest = order.filter((p) => p !== 'SB' && p !== 'BB');
+  const post: Position[] = [...order.filter((p) => p === 'SB' || p === 'BB'), ...rest];
+  return post.indexOf(pos);
+}
