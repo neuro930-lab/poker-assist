@@ -9,6 +9,14 @@ import type { GameState, Opponent } from '../engine/state';
 
 export const MODEL = 'claude-opus-5-5';
 
+/** 画面読み取りに使うモデル（設定で選べる）。精度は Opus、速さは Sonnet / Haiku */
+export const VISION_MODELS = [
+  { id: 'claude-opus-5-5', label: 'Claude Opus 5.5（高精度・標準）' },
+  { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5（速い）' },
+  { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5（最速・低コスト）' },
+] as const;
+export type VisionModel = (typeof VISION_MODELS)[number]['id'];
+
 /**
  * APIキーはこのブラウザの localStorage にだけ保存し、api.anthropic.com に直接送る。
  * 自分専用のローカルツールとして使う前提（公開サーバーに置く場合はバックエンド経由にすること）。
@@ -21,6 +29,8 @@ const POS = z.enum([...ALL_POSITIONS, 'unknown']);
 
 const ScreenSchema = z.object({
   is_poker_table: z.boolean().describe('ポーカーのテーブル画面か'),
+  hand_in_progress: z.boolean().describe('自分の手札2枚が表向きで見えていて、ハンドの途中か'),
+  is_hero_turn: z.boolean().describe('今まさに自分のアクション番か（コール／レイズ等のボタンが出ている）'),
   notes: z.string().describe('読み取りの補足・自信がない点（日本語・短く）'),
   format: z.enum(['ring', 'tournament', 'unknown']),
   players: z.number().int().describe('卓に座っているプレイヤー数（空席は除く、2〜9）'),
@@ -41,23 +51,36 @@ const ScreenSchema = z.object({
         role: z.enum(['unknown', 'opener', 'caller', '3bettor', '4bettor', 'limper', 'blind']),
       }),
     )
-    .describe('まだハンドに残っている（フォールドしていない）相手のみ'),
+    .describe('このストリートまでに自分からチップを入れて参加した相手のみ（FOLD表示の人、まだ一度も行動していない人は除く）'),
   villain_action: z.enum(['none', 'check', 'bet', 'raise']).describe('今のストリートで相手がした一番強いアクション'),
   villain_bets_earlier: z.number().int().describe('前のストリートで相手がベット・レイズした回数（分かる範囲）'),
 });
 export type ScreenRead = z.infer<typeof ScreenSchema>;
 
-const VISION_PROMPT = `これはテキサスホールデムのゲーム画面のスクリーンショットです。今の局面を正確に読み取ってください。
+const VISION_PROMPT = `これはテキサスホールデム（スマホアプリ）のゲーム画面です。縦長の画面で、PCにミラーリングしたものをキャプチャしている場合があります（ウィンドウの枠や余白は無視）。今の局面を正確に読み取ってください。
 
-読み取りのルール：
-- 「自分」は画面下中央の席、または手札が表向きで見えている席。
-- カードは "As"（スペードのA）、"Td"（ダイヤの10）の形式。スートは s=♠ h=♥ d=♦ c=♣。4色デッキ（♦青・♣緑）にも注意。
-- ディーラーボタン（D）の位置から各プレイヤーのポジションを決める。BTNの次がSB、その次がBB。人数が少ないときは前のポジション（UTG側）から消える（6人ならLJ, HJ, CO, BTN, SB, BB）。
-- 金額は画面の表示単位のまま。BB表示なら big_blind=1。ブラインド額が見えない場合は null。
-- pot はテーブル中央のポット＋このストリートで各プレイヤーの前に出ているベットの合計。
-- to_call は「一番大きいベット − 自分が今のストリートで出している額」。自分の番でない・不明なら推測で。
-- opponents にはフォールドしていない相手だけを入れる。役割（opener=最初にレイズ、caller=コール、3bettor など）はチップの位置やアクション表示から推測。
-- 見えない・自信のない情報は notes に書く。カードを推測で埋めない（見えないなら配列を空に）。`;
+画面の見方：
+- 画面いちばん下に大きく表示されている2枚のカードが「自分」の手札。自分の席はその近く（下側）のアイコン。
+- 各プレイヤーはアイコン＋名前＋その下の数字（＝残りスタック）。アイコンに「FOLD」と出ている人はフォールド済み。
+- アイコンの左上にある小さな「D」マーク（オレンジ等）がディーラーボタン。「SB」「BB」バッジが付いている人がブラインド。
+- テーブル中央の「POT」の数字に加えて、各プレイヤーの前に置かれたチップの数字（楕円の枠に入った数字）が、このストリートのベット額。
+- カードは "As"（スペードのA）、"Td"（ダイヤの10）の形式。s=♠ h=♥ d=♦ c=♣。
+
+ポジションの決め方：
+- 席は時計回りに並んでいる。D の次の席が SB、その次が BB（SB/BB バッジがあればそれを優先）。
+- 6人なら D から時計回りに BTN, SB, BB, LJ, HJ, CO。人数が少ないときは UTG 側（BBの次）から消える。空席は数えない。
+
+金額：
+- big_blind：画面に表示がなければ、BBバッジの人の前のベット額（プリフロップでまだ誰もレイズしていない段階）または SB のベット額の2倍から推定。どうしても分からなければ null。
+- pot：中央の POT の数字＋全員の前に出ているベット額の合計（＝今コールした場合を除く、テーブル上の総額）。
+- to_call：一番大きいベット額 − 自分の前に出ているベット額。自分の番でなくても、この時点の値を入れる。
+- 1/6位・Lv.1 などの表示や「順位」があればトーナメント。
+
+その他：
+- opponents には、自分からチップを入れて参加した相手（レイズ・コール・ベットした人。リンプ含む）だけを入れる。まだ行動していない人・FOLDの人は入れない。
+- preflop：自分より前に誰かがレイズしていれば raised（そのレイザーの role は opener）。
+- 手札が見えない（ハンドとハンドの間など）は hand_in_progress=false、hero_cards は空。
+- 見えない・自信のない情報は notes に短く書く。カードを推測で埋めない。`;
 
 function toState(r: ScreenRead, fallbackFormat: Format): { state: Partial<GameState>; warnings: string[] } {
   const warnings: string[] = [];
@@ -102,6 +125,9 @@ export interface ScreenResult {
   state: Partial<GameState>;
   warnings: string[];
   notes: string;
+  /** 手札が見えていてハンドの途中か（false のときは局面を上書きしない） */
+  handInProgress: boolean;
+  isHeroTurn: boolean;
   raw: ScreenRead;
 }
 
@@ -109,29 +135,43 @@ export async function readScreenshot(
   apiKey: string,
   image: { base64: string; mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif' },
   fallbackFormat: Format,
+  opts: { model?: VisionModel; signal?: AbortSignal } = {},
 ): Promise<ScreenResult> {
-  const res = await client(apiKey).beta.messages.parse({
-    model: MODEL,
-    max_tokens: 16000,
-    betas: ['server-side-fallback-2026-07-01'],
-    fallbacks: 'default',
-    output_config: { effort: 'medium', format: betaZodOutputFormat(ScreenSchema) },
-    messages: [
-      {
-        role: 'user',
-        content: [
-          { type: 'image', source: { type: 'base64', media_type: image.mediaType, data: image.base64 } },
-          { type: 'text', text: VISION_PROMPT },
-        ],
-      },
-    ],
-  });
+  const model = opts.model ?? MODEL;
+  // Haiku 5.5 はサーバー側フォールバック非対応
+  const fallback = model === 'claude-haiku-5-5' ? {} : { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' as const };
+  const res = await client(apiKey).beta.messages.parse(
+    {
+      model,
+      max_tokens: 16000,
+      ...fallback,
+      // リアルタイムで使うので、考える量は少なめ（読み取りは推論より視覚が中心）
+      output_config: { effort: 'low', format: betaZodOutputFormat(ScreenSchema) },
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: image.mediaType, data: image.base64 } },
+            { type: 'text', text: VISION_PROMPT },
+          ],
+        },
+      ],
+    },
+    { signal: opts.signal },
+  );
   if (res.stop_reason === 'refusal') throw new Error('この画像は解析できませんでした（リクエストが拒否されました）');
   const parsed = res.parsed_output;
   if (!parsed) throw new Error('解析結果を読み取れませんでした。もう一度試してください');
   if (!parsed.is_poker_table) throw new Error(`ポーカーの画面として認識できませんでした：${parsed.notes}`);
   const { state, warnings } = toState(parsed, fallbackFormat);
-  return { state, warnings, notes: parsed.notes, raw: parsed };
+  return {
+    state,
+    warnings,
+    notes: parsed.notes,
+    handInProgress: parsed.hand_in_progress && (state.heroCards?.length ?? 0) === 2,
+    isHeroTurn: parsed.is_hero_turn,
+    raw: parsed,
+  };
 }
 
 const COACH_SYSTEM = `あなたは世界トップクラスのポーカーコーチです（GTOと実戦的なエクスプロイトの両方に精通）。
@@ -205,6 +245,23 @@ export function explainApiError(e: unknown): string {
   if (e instanceof Anthropic.APIError) return `APIエラー（${e.status}）：${e.message}`;
   if (e instanceof Error) return e.name === 'AbortError' ? '中止しました' : e.message;
   return String(e);
+}
+
+const MODEL_STORAGE = 'poker-assist.vision-model';
+export function loadVisionModel(): VisionModel {
+  try {
+    const v = localStorage.getItem(MODEL_STORAGE);
+    return VISION_MODELS.some((m) => m.id === v) ? (v as VisionModel) : MODEL;
+  } catch {
+    return MODEL;
+  }
+}
+export function saveVisionModel(m: VisionModel): void {
+  try {
+    localStorage.setItem(MODEL_STORAGE, m);
+  } catch {
+    // 保存できなくてもその場では使える
+  }
 }
 
 const KEY_STORAGE = 'poker-assist.anthropic-key';

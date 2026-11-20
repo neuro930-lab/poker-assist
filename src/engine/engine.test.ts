@@ -150,6 +150,15 @@ describe('advisor', () => {
     const nuts = advise(st({ ...base, heroCards: ['Kh', 'Kd'] }), settings);
     expect(['raise', 'allin']).toContain(nuts.action);
   });
+  it('BBのエンジン補正：表ではフォールドでもオッズが良ければコール、悪ければフォールド', () => {
+    const base = {
+      format: 'tournament' as const, players: 6, heroPosition: 'BB' as const, heroCards: ['6h', '5c'],
+      preflop: 'raised' as const, heroStack: 24, opponents: [{ position: 'CO' as const, stack: 17.5, role: 'opener' as const }],
+    };
+    expect(advise(st({ ...base, pot: 5, toCall: 1.5 }), settings).action).toBe('call');
+    expect(advise(st({ ...base, heroCards: ['7h', '2c'], pot: 5, toCall: 1.5 }), settings).action).toBe('fold');
+    expect(advise(st({ ...base, pot: 8, toCall: 5 }), settings).action).toBe('fold');
+  });
   it('ドローのコール：ポットオッズが合えばコール', () => {
     const a = advise(st({
       preflop: 'raised', heroPosition: 'BTN', heroCards: ['Ah', '5h'], board: ['Kh', '9h', '2c'],

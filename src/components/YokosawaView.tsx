@@ -17,7 +17,12 @@ export function YokosawaView({ format, settings, advice, showRange, onToggleRang
   const highlight = showRange && advice.highlightHands.length > 0 ? new Set(advice.highlightHands) : undefined;
   return (
     <section className="panel yokosawa">
-      <h2>③ ヨコサワ表での位置 <small>{FORMAT_LABELS[format]}</small></h2>
+      <h2>
+        ③ ヨコサワ表での位置 <small>{FORMAT_LABELS[format]}</small>
+        <a className="small-btn" href="./yokosawa-ranges.xlsx" download>
+          Excel版をダウンロード
+        </a>
+      </h2>
       {y ? (
         <p className="y-summary">
           <span className="hand-name">{y.hand}</span> は
@@ -38,7 +43,7 @@ export function YokosawaView({ format, settings, advice, showRange, onToggleRang
       ) : (
         <p className="hint">手札を入力すると、表の中の位置が青枠で表示されます。</p>
       )}
-      <HandGrid settings={settings} selected={y?.hand ?? null} highlight={highlight} />
+      <HandGrid settings={settings} selected={y?.hand ?? null} highlight={highlight} headers />
       <div className="legend">
         <span className="lg-me">青枠＝自分の手札</span>
         <label className="lg-range">

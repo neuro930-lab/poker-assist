@@ -65,6 +65,8 @@ export interface Advice {
   heroHand?: string;
 }
 
+/** BBがポジションの悪さで実現できるエクイティの割合（概算） */
+const BB_REALIZATION = 0.75;
 const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
 const fmt = (x: number) => (Math.abs(x) >= 100 ? x.toFixed(0) : x.toFixed(1).replace(/\.0$/, ''));
 
@@ -298,12 +300,18 @@ function preflopAdvice(a: Advice, c: Ctx): Advice {
       a.reasons.push(`${eqLine}、必要勝率 ${pct(c.req)}`);
       if (heroPos === 'BB') a.reasons.push('BBは既に1BB払っていて、ポットオッズが良い');
       else if (!ip) a.notes.push('ポジションが悪いコールはエクイティを実現しにくいので、迷うならフォールド寄りで');
+    } else if (heroPos === 'BB' && c.equity.equity * BB_REALIZATION >= c.req + 0.01 && c.callBB <= c.effBB * 0.35) {
+      // エンジン補正：ヨコサワ表ではフォールドでも、BBはオッズが良いのでソルバーは広く守る
+      set('call', 'コール（エンジン補正）');
+      a.reasons.push(`ヨコサワ表ではフォールド（${decision.reason}）`);
+      a.reasons.push(
+        `ただしBBはオッズが非常に良い：${eqLine}、ポジションが悪い分を割り引いても（×${BB_REALIZATION}）必要勝率 ${pct(c.req)} を上回る → コールで守るほうが得`,
+      );
+      a.notes.push('フロップで当たらなければ素直に降りる前提のコール。トーナメントの入賞直前（ICM）ではフォールド寄りに');
     } else {
       set('fold', 'フォールド');
       a.reasons.push(decision.reason);
       a.reasons.push(`相手のレンジに対して不利（${eqLine}、必要勝率 ${pct(c.req)}）`);
-      if (heroPos === 'BB' && c.equity.equity * 0.85 > c.req)
-        a.notes.push('数字上はコールの余地あり（相手が広くオープンしているなら防衛も可）');
     }
     for (const n of decision.notes) a.notes.push(n);
     return a;

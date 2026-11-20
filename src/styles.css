@@ -303,3 +303,54 @@ header { gap: 8px 16px; }
   .action { font-size: 30px; }
   .controls .group:last-child { margin-left: 0; }
 }
+
+/* ---- 表計算風の見出し・現在の手札の強調 ---- */
+.hand-grid.with-headers { grid-template-columns: 1.4em repeat(13, minmax(0, 1fr)); }
+.grid-head {
+  display: grid; place-items: center; font-size: 12px; font-weight: 700; color: var(--muted);
+  background: var(--wait-bg); border-radius: 3px; min-height: 1.4em;
+}
+.grid-head.corner { background: transparent; }
+.grid-head.hl { background: var(--me); color: #fff; }
+.hand-grid .cell.cross { filter: brightness(0.93); box-shadow: inset 0 0 0 2px rgba(37, 99, 235, 0.45); }
+.hand-grid .cell.selected {
+  outline: 4px solid var(--me);
+  box-shadow: 0 0 0 7px rgba(37, 99, 235, 0.35);
+  transform: scale(1.18);
+  z-index: 2;
+  animation: hand-pulse 1.4s ease-in-out infinite;
+}
+@keyframes hand-pulse {
+  50% { box-shadow: 0 0 0 11px rgba(37, 99, 235, 0.12); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hand-grid .cell.selected { animation: none; }
+}
+a.small-btn {
+  border: 1px solid var(--border); border-radius: 6px; color: var(--text); text-decoration: none; background: var(--panel);
+}
+
+/* ---- ライブ（画面共有） ---- */
+.input-tabs { display: flex; gap: 4px; margin-left: auto; }
+.input-tabs button { padding: 3px 10px; font-size: 13px; font-weight: normal; }
+.live-video {
+  position: relative; background: #0b0f14; border-radius: 8px; overflow: hidden; margin-bottom: 10px;
+  display: grid; place-items: center; min-height: 200px;
+}
+.live-video video { display: block; max-width: 100%; max-height: 72vh; }
+.live-video.empty video { display: none; }
+.live-placeholder { color: #cbd5e1; padding: 20px; text-align: center; }
+.live-placeholder .hint { color: #94a3b8; }
+.live-badge, .turn-badge {
+  position: absolute; top: 8px; padding: 3px 10px; border-radius: 999px; font-size: 13px; font-weight: 700; color: #fff;
+}
+.live-badge { left: 8px; background: rgba(22, 163, 74, 0.9); }
+.live-badge.reading { background: rgba(37, 99, 235, 0.95); }
+.live-badge.error { background: rgba(220, 38, 38, 0.95); }
+.turn-badge { right: 8px; background: rgba(234, 88, 12, 0.95); animation: hand-pulse 1.4s infinite; }
+.meter { margin-left: 8px; font-variant-numeric: tabular-nums; }
+details.editor-details > summary { cursor: pointer; font-weight: 700; font-size: 15px; list-style: revert; }
+details.editor-details[open] > summary { margin-bottom: 10px; }
+
+/* ライブ中は左の列を狭く（縦長の画面に合わせる） */
+.analyze.live-mode { grid-template-columns: minmax(300px, 0.8fr) minmax(0, 1.2fr); }

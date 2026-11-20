@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadApiKey, saveApiKey, type ScreenResult } from './ai/claude';
+import { VISION_MODELS, loadApiKey, loadVisionModel, saveApiKey, saveVisionModel, type ScreenResult, type VisionModel } from './ai/claude';
 import { AdvicePanel } from './components/AdvicePanel';
 import { CoachPanel } from './components/CoachPanel';
+import { LivePanel } from './components/LivePanel';
 import { PreflopTrainer } from './components/PreflopTrainer';
 import { ScreenshotPanel } from './components/ScreenshotPanel';
 import { SettingsPanel } from './components/SettingsPanel';
@@ -35,6 +36,8 @@ export default function App() {
   const [state, setState] = useState<GameState>(() => emptyState(loadFormat()));
   const [apiKey, setApiKey] = useState(loadApiKey);
   const [showRange, setShowRange] = useState(true);
+  const [visionModel, setVisionModel] = useState<VisionModel>(loadVisionModel);
+  const [input, setInput] = useState<'live' | 'image'>('live');
 
   useEffect(() => saveSettings('ring', settings.ring), [settings.ring]);
   useEffect(() => saveSettings('tournament', settings.tournament), [settings.tournament]);
@@ -54,7 +57,7 @@ export default function App() {
   const advice = useMemo(() => advise({ ...state, format }, settings), [state, format, settings]);
 
   const onScreen = (r: ScreenResult) => {
-    const next: GameState = { ...emptyState(format), ...r.state };
+    const next: GameState = { ...emptyState(r.state.format ?? format), ...r.state };
     if (next.format !== format) setFormat(next.format);
     setState(next);
   };
@@ -84,19 +87,36 @@ export default function App() {
       </header>
 
       {tab === 'analyze' && (
-        <main className="analyze">
+        <main className={`analyze${input === 'live' ? ' live-mode' : ''}`}>
           <div className="col">
-            <ScreenshotPanel apiKey={apiKey} format={format} onResult={onScreen} onNeedKey={() => setTab('settings')} />
             <section className="panel">
               <h2>
-                局面（読み取り結果の確認・手入力）
-                <button type="button" className="small-btn" onClick={() => setState(emptyState(format))}>クリア</button>
+                ① ゲーム画面
+                <span className="input-tabs" role="group" aria-label="入力方法">
+                  <button type="button" className={input === 'live' ? 'active' : ''} onClick={() => setInput('live')}>
+                    リアルタイム（画面共有）
+                  </button>
+                  <button type="button" className={input === 'image' ? 'active' : ''} onClick={() => setInput('image')}>
+                    画像を貼り付け
+                  </button>
+                </span>
               </h2>
-              <StateEditor
-                state={state}
-                labelFirstSeatAsUtg={settings[format].labelFirstSeatAsUtg}
-                onChange={setState}
-              />
+              {input === 'live' ? (
+                <LivePanel apiKey={apiKey} model={visionModel} format={format} onResult={onScreen} onNeedKey={() => setTab('settings')} />
+              ) : (
+                <ScreenshotPanel apiKey={apiKey} model={visionModel} format={format} onResult={onScreen} onNeedKey={() => setTab('settings')} />
+              )}
+            </section>
+            <section className="panel">
+              <details className="editor-details" open={input === 'image'}>
+                <summary>局面（読み取り結果の確認・手入力）</summary>
+                <button type="button" className="small-btn" onClick={() => setState(emptyState(format))}>クリア</button>
+                <StateEditor
+                  state={state}
+                  labelFirstSeatAsUtg={settings[format].labelFirstSeatAsUtg}
+                  onChange={setState}
+                />
+              </details>
             </section>
           </div>
           <div className="col">
@@ -139,6 +159,13 @@ export default function App() {
                 </button>
               )}
             </div>
+            <h2>画面読み取りのモデル</h2>
+            <select value={visionModel} onChange={(e) => { const m = e.target.value as VisionModel; setVisionModel(m); saveVisionModel(m); }}>
+              {VISION_MODELS.map((m) => (
+                <option key={m.id} value={m.id}>{m.label}</option>
+              ))}
+            </select>
+            <p className="hint">リアルタイムで遅く感じるときは Sonnet / Haiku に。読み間違いが多いときは Opus に。AIコーチは常に Opus 5.5 です。</p>
           </section>
           <SettingsPanel
             format={format}
