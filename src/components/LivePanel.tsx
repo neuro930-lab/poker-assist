@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { explainApiError, readScreenshot, type ScreenResult, type VisionModel } from '../ai/claude';
+import { explainApiError, type ScreenResult } from '../ai/claude';
+import { readScreen, readerNotReadyMessage, readerReady, type Reader } from '../ai/reader';
+import { warmBridge } from '../ai/local';
 import { ChangeDetector, DEFAULT_DETECTOR } from '../live/changeDetector';
 import type { Format } from '../logic/yokosawa';
 
 interface Props {
-  apiKey: string;
-  model: VisionModel;
+  reader: Reader;
   format: Format;
   onResult: (r: ScreenResult) => void;
   onNeedKey: () => void;
@@ -13,12 +14,13 @@ interface Props {
 
 const SAMPLE_MS = 400;
 const DIFF_W = 48;
-const MAX_EDGE = 1400;
+// 小さめに縮小して送ると速い（読み取りに必要な文字は十分読める大きさ）
+const MAX_EDGE = 1100;
 const INTERVALS = [1500, 2500, 4000, 8000];
 
 type Status = 'idle' | 'watching' | 'reading' | 'error';
 
-export function LivePanel({ apiKey, model, format, onResult, onNeedKey }: Props) {
+export function LivePanel({ reader, format, onResult, onNeedKey }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const detector = useRef(new ChangeDetector({ ...DEFAULT_DETECTOR }));
@@ -35,8 +37,8 @@ export function LivePanel({ apiKey, model, format, onResult, onNeedKey }: Props)
   const [motion, setMotion] = useState({ change: 0, motion: 0 });
 
   // 最新の props をタイマーから参照する
-  const latest = useRef({ apiKey, model, format, onResult, auto });
-  latest.current = { apiKey, model, format, onResult, auto };
+  const latest = useRef({ reader, format, onResult, auto });
+  latest.current = { reader, format, onResult, auto };
 
   useEffect(() => {
     detector.current.opts = { ...detector.current.opts, minIntervalMs: interval };
@@ -67,6 +69,7 @@ export function LivePanel({ apiKey, model, format, onResult, onNeedKey }: Props)
       v.srcObject = stream;
       await v.play();
       detector.current.reset();
+      if (reader.mode === 'local' && reader.bridgeOk) warmBridge(reader.localModel);
       setSharing(true);
       setStatus('watching');
       setInfo('画面の変化を待っています');
@@ -100,13 +103,13 @@ export function LivePanel({ apiKey, model, format, onResult, onNeedKey }: Props)
     c.width = Math.round(v.videoWidth * scale);
     c.height = Math.round(v.videoHeight * scale);
     c.getContext('2d')!.drawImage(v, 0, 0, c.width, c.height);
-    const url = c.toDataURL('image/jpeg', 0.88);
+    const url = c.toDataURL('image/jpeg', 0.85);
     return url.slice(url.indexOf(',') + 1);
   };
 
   const read = useCallback(async (gray: Uint8Array | null) => {
-    const { apiKey, model, format, onResult } = latest.current;
-    if (!apiKey) {
+    const { reader, format, onResult } = latest.current;
+    if (!readerReady(reader)) {
       onNeedKey();
       return;
     }
@@ -120,7 +123,7 @@ export function LivePanel({ apiKey, model, format, onResult, onNeedKey }: Props)
     setError('');
     const t0 = performance.now();
     try {
-      const r = await readScreenshot(apiKey, { base64: jpeg, mediaType: 'image/jpeg' }, format, { model, signal: ac.signal });
+      const r = await readScreen(reader, { base64: jpeg, mediaType: 'image/jpeg' }, format, ac.signal);
       setReads((n) => n + 1);
       const sec = ((performance.now() - t0) / 1000).toFixed(1);
       const time = new Date().toLocaleTimeString('ja-JP');
@@ -206,7 +209,11 @@ export function LivePanel({ apiKey, model, format, onResult, onNeedKey }: Props)
           </select>
         </label>
       </div>
-      {!apiKey && <p className="hint">読み取りには Anthropic APIキーが必要です（設定タブ）。</p>}
+      {readerReady(reader) ? (
+        <p className="hint">読み取り：{reader.mode === 'local' ? `PCのClaude（${reader.localModel}）` : 'Anthropic API'}</p>
+      ) : (
+        <p className="hint">{readerNotReadyMessage(reader)}</p>
+      )}
       {sharing && (
         <p className="hint">
           {info} ／ 読み取り回数 {reads}
